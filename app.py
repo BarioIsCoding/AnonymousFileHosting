@@ -174,7 +174,7 @@ def radical_image_compression(input_path, output_path, smart_anonymity_enabled=F
         pixels = img.reshape((-1, 3)).astype(np.float32)
         # Define criteria and apply kmeans()
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-        K = 16 # Reduce to 16 colors
+        K = 256 # Reduce to 16 colors
         _, labels, centers = cv2.kmeans(pixels, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
         # Convert back to 8-bit values
         centers = np.uint8(centers)
