@@ -32,7 +32,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 
 ### Storage & Data Reduction
 * **Aggressive Compression**: Videos and images are heavily compressed with low bitrates and reduced resolutions to minimize storage.
-* **Color Quantization**: Images are posterized, reducing the color palette to just 16 colors. This merges flat areas, enhances anonymity, and significantly cuts down on file size.
+* **Color Quantization**: Images are posterized, reducing the color palette to just 256 colors. This merges flat areas, enhances anonymity, and significantly cuts down on file size.
 * **Selective Noise**: A small amount of digital noise is added only to high-detail areas of an image, further breaking forensic analysis without unnecessarily increasing file size.
 * **Audio Stripping**: All audio tracks are removed from video files.
 
