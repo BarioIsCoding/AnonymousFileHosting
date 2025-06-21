@@ -1,0 +1,5 @@
+## Third-Party Components
+
+This project uses the `haarcascade_frontalface_default.xml` model file from the OpenCV project.  
+OpenCV is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).  
+The file is © OpenCV contributors.
