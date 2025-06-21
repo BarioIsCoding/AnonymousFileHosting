@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Redirect</title>
+    <style>
+        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; text-align: center; padding-top: 100px; }
+        a { color: #bb86fc; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to the Privacy Uploader</h1>
+    <p>If you are not automatically redirected, please <a href="http://127.0.0.1:5000">click here</a>.</p>
+    <script>
+        // Simple redirect to the Flask application.
+        // This file is just a static entry point.
+        window.location.href = "http://127.0.0.1:5000";
+    </script>
+</body>
+</html>
