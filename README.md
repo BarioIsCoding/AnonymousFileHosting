@@ -51,10 +51,6 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 ## 4. Setup & Installation
 
 1.  **Clone the repository:**
-    ```bash
-    git clone [your-repository-url]
-    cd [repository-directory]
-    ```
 
 2.  **Install Python dependencies:**
     ```bash
@@ -70,12 +66,14 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 4.  **Download Haar Cascade Model:**
     * Download the `haarcascade_frontalface_default.xml` file from the [OpenCV GitHub repository](https://github.com/opencv/opencv/tree/master/data/haarcascades).
     * Place it in the root directory of the project.
+*Note: This package already contains this file. You don't have to do this manually.*
 
 5.  **Create Directories:**
     ```bash
     mkdir uploads
     mkdir static
     ```
+*Running app.py for the first time does this for you.*
 
 6.  **Run the Application (for testing only):**
     ```bash
