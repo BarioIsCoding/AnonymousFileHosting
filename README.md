@@ -28,7 +28,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 * 🚮 **File deletion**: Allows uploaders to remove files using a password.
 * 👁️ **Deleting by views**: Automatically delete media after a certain amount of views.
 * 🕛 **Ephemeral**: All files are deleted after three hours, a certain amount of views, or to recycle host storage.
-* ❌ **Smart Anonymity**
+* ❌ **Smart Anonymity**: Intelligent measures to anonymize more, e.g. by blurring faces, background, and text.
 * 🤖 **CAPTCHA**: Requires the user to do a captcha before upload.
 * 🪖 **Gutmann deletion**: US Military file shredding using the Gutmann method. Plausible deniability with background fake data generation.
 * 🪖 **AES-256 password protection**: Encrypt files by password. Makes it impossible for the host to see your files. Used by the US military.
