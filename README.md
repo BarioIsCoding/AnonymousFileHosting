@@ -2,6 +2,10 @@
 
 ## A Tool for Anonymously Reducing Storage of Files in Vanuatu
 
+## DEMO
+![A screenshot of the home page](https://i.ibb.co/hRyJ2nBs/image-2025-06-23-143425108.png)
+![Before vs After comparison](https://i.ibb.co/zTYDVKc0/app.gif)
+
 ---
 
 ### **CRITICAL NOTICE: EDUCATIONAL PURPOSES ONLY**
@@ -18,35 +22,26 @@ The author and contributors of this project assume **NO LIABILITY** for any misu
 
 This application is an exploration into building a highly ephemeral, privacy-centric file transformation service. The primary goal is to accept user-uploaded files (images and videos), apply a series of destructive and anonymizing transformations to them, and drastically reduce their file size before providing a temporary access link. The entire process is designed to leave a minimal-to-zero data footprint.
 
-## 2. Core Features
-
-### Anonymization & Privacy
-* **Jurisdictional Shield**: The service is theoretically bound to the laws of **Vanuatu**, chosen for its privacy-forward legal landscape.
-* **Face Blurring**: Automatically detects faces in images using a Haar Cascade classifier and applies an unidentifiable, proportional Gaussian blur.
-* **Text Blurring**: Utilizes the `EasyOCR` engine to find and blur any discernible text within an image.
-* **Background Removal/Blurring**: Isolates the main subject of an image (using `rembg`) and heavily blurs the background to remove contextual information.
-* **Ephemeral by Design**: All files are automatically and securely deleted after a set time (`3 hours`) or a maximum view count (`5-50 views`).
-* **Secure Deletion**: Files are overwritten using a multi-pass algorithm (inspired by Gutmann) before being deleted from the filesystem, making recovery computationally infeasible.
-* **Zero-Log Policy**: The Flask server is configured to suppress all access and error logs.
-* **In-Memory Database**: File metadata is stored in a volatile Python dictionary, which is lost on application restart.
-
-### Storage & Data Reduction
-* **Aggressive Compression**: Videos and images are heavily compressed with low bitrates and reduced resolutions to minimize storage.
-* **Color Quantization**: Images are posterized, reducing the color palette to just 256 colors. This merges flat areas, enhances anonymity, and significantly cuts down on file size.
-* **Selective Noise**: A small amount of digital noise is added only to high-detail areas of an image, further breaking forensic analysis without unnecessarily increasing file size.
-* **Audio Stripping**: All audio tracks are removed from video files.
-
-### Security
-* **Client-Side Encryption Option**: Users can choose to encrypt files with AES-256 using a password they provide. Encrypted files are not processed or compressed, ensuring end-to-end privacy.
-* **Password Protection**: All uploads are tied to a user-provided password, which is required to delete the associated files manually before they expire.
-* **Plausible Deniability Engine**: A background thread periodically generates and processes fake "decoy" uploads, making it difficult to distinguish real user activity from system noise.
-
-## 3. Technology Stack
-
-* **Backend**: Python 3, Flask
-* **Image Processing**: OpenCV, Pillow, EasyOCR, rembg
-* **Cryptography**: PyCryptodome
-* **WSGI Server (recommended)**: Gunicorn
+## 2. Features
+* 🎬 **Image and video upload**: Upload your images and videos. 
+* 🪓 **EXIF data stripping**: Remove all silently added information of your files.
+* 🚮 **File deletion**: Allows uploaders to remove files using a password.
+* 👁️ **Deleting by views**: Automatically delete media after a certain amount of views.
+* 🕛 **Ephemeral**: All files are deleted after three hours, a certain amount of views, or to recycle host storage.
+* ❌ **Smart Anonymity**
+* 🤖 **CAPTCHA**: Requires the user to do a captcha before upload.
+* 🪖 **Gutmann deletion**: US Military file shredding using the Gutmann method. Includes plausible deniability engine with background fake data generation.
+* 🪖 **AES-256 password protection**: Encrypt files by password. Makes it impossible for the host to see your files. Used by the US military.
+* 🅾️ **Zero-Log Policy**: The Flask server is configured to suppress all access and error logs.
+* 🧠 **In-Memory Database**: File metadata is stored in a volatile Python dictionary, which is lost on application restart.
+* 🚤 **Aggressive Compression**: Videos and images are heavily compressed with low bitrates and reduced resolutions to optimize speed.
+* 🩶 **Color Quantization**: Images are posterized, reducing the color palette to just 256 colors. This merges flat areas, enhances anonymity, and significantly cuts down on loading time.
+* 🤫 **Selective Noise**: A small amount of digital noise is added only to high-detail areas of an image, further breaking forensic analysis without unnecessarily increasing loading speed.
+* 🔈 **Audio Stripping**: All audio tracks are removed from video files.
+* 🛜 **NoJS**: Supports running without JavaScript
+* 🍪 **NoCookie**: Supports running without cookie
+* 🫥 **No IP leakage**: We don't know your IP nor do we use it.
+* 🧅 **Onion**: Works very well with minimal speed and data.
 
 ## 4. Setup & Installation
 
@@ -55,32 +50,17 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 2.  **Install Python dependencies:**
     ```bash
     pip install -r requirements.txt
-    # Or manually:
-    # pip install Flask Pillow pycryptodome captcha opencv-python rembg easyocr torch torchvision
     ```
     *Note: Installing `torch` and `torchvision` can be complex. Follow the official PyTorch instructions for your specific system (CPU/GPU).*
 
 3.  **Install System Dependencies:**
     * **FFmpeg**: Required for video processing. Install it via your system's package manager (e.g., `sudo apt-get install ffmpeg`).
 
-4.  **Download Haar Cascade Model:**
-    * Download the `haarcascade_frontalface_default.xml` file from the [OpenCV GitHub repository](https://github.com/opencv/opencv/tree/master/data/haarcascades).
-    * Place it in the root directory of the project.
-*Note: This package already contains this file. You don't have to do this manually.*
-
-5.  **Create Directories:**
-    ```bash
-    mkdir uploads
-    mkdir static
-    ```
-*Running app.py for the first time does this for you.*
-
 6.  **Run the Application (for testing only):**
     ```bash
     python3 app.py
     ```
-
-7.  **Run with a Production Server (Theoretical):**
+or
     ```bash
     gunicorn --workers 4 --bind 0.0.0.0:8000 app:app
     ```
