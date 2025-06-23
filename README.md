@@ -45,7 +45,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 * 🤫 **Selective Noise**: Digital noise on high-detail area, further breaking analysis without unnecessarily slowing down loading.
 * 🔈 **Audio Stripping**: All audio tracks are removed from video files.
 * 🛜 **NoJS**: Supports running without JavaScript
-* 🍪 **NoCookie**: Supports running without cookies. Cookies are stored once for each image that has `Ignore views by the same person` enabled.  
+* 🍪 **NoCookie**: Supports use without cookies. Cookies are stored once for each image that has `Ignore views by the same person` enabled.  
 * 🫥 **No IP leakage**: We don't know store your unencrypted IP.
 * 👾 **Secure tracking**: DDoS, mass reports, and spam attacks are primarily defended by timing protection.
 * 🧅 **Onion**: Works very well with minimal speed and data.
