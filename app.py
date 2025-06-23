@@ -37,12 +37,14 @@ import logging
 import mimetypes
 import gc
 import sqlite3
+import socket
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 # --- Third-party imports ---
 from flask import Flask, request, redirect, url_for, render_template_string, make_response, session, jsonify
 from PIL import Image, ImageFilter
+from PIL.ExifTags import TAGS
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from captcha.image import ImageCaptcha
@@ -65,6 +67,7 @@ PASSWORD_SALT = get_random_bytes(16).hex()
 HAAR_CASCADE_PATH = 'haarcascade_frontalface_default.xml'
 JURISDICTION = "Vanuatu" # Legal jurisdiction for the service
 REPORTS_DB_FILE = 'reports.db'
+CONFIGURATION_FILE = 'CONFIGURATION'
 
 # --- Report Categories ---
 REPORT_CATEGORIES = [
@@ -97,6 +100,49 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['STATIC_FOLDER'] = STATIC_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 app.secret_key = get_random_bytes(32)
+
+# --- Configuration Management ---
+def load_configuration():
+    """Load configuration from CONFIGURATION file"""
+    config = {
+        'smart_anonymity_enabled': True  # Default value
+    }
+    
+    try:
+        if os.path.exists(CONFIGURATION_FILE):
+            with open(CONFIGURATION_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line == 'smart_anonymity: false':
+                        config['smart_anonymity_enabled'] = False
+                        break
+    except Exception as e:
+        print(f"Warning: Could not read configuration file: {e}")
+    
+    return config
+
+# Load configuration at startup
+APP_CONFIG = load_configuration()
+
+# --- Connection Speed Detection ---
+def detect_local_hosting():
+    """Detect if the application is running locally"""
+    try:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        return local_ip.startswith('127.') or local_ip.startswith('192.168.') or local_ip.startswith('10.') or hostname == 'localhost'
+    except:
+        return False
+
+def get_server_info():
+    """Get server information for local hosting detection"""
+    try:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        port = request.environ.get('SERVER_PORT', '5000')
+        return f"{local_ip}:{port}"
+    except:
+        return "localhost:5000"
 
 # --- Database Functions ---
 def init_reports_database():
@@ -199,6 +245,40 @@ file_db = {}
 db_lock = threading.Lock()
 last_upload_time = time.time()
 report_timestamps = {}  # Simple rate limiting for reports
+view_tracking = {}  # For tracking duplicate views: {file_id: {ip_hash: last_view_time, ...}}
+view_tracking_lock = threading.Lock()
+
+# --- View Tracking Functions ---
+def hash_ip(ip_address):
+    """Hash IP address for privacy"""
+    return hashlib.sha256((ip_address + PASSWORD_SALT).encode()).hexdigest()[:16]
+
+def should_count_view(file_id, ip_address, cookie_value):
+    """Determine if a view should be counted based on IP, cookie, and timing"""
+    current_time = time.time()
+    ip_hash = hash_ip(ip_address)
+    
+    with view_tracking_lock:
+        if file_id not in view_tracking:
+            view_tracking[file_id] = {}
+        
+        file_views = view_tracking[file_id]
+        
+        # Check if this IP has viewed recently (within 45 seconds)
+        if ip_hash in file_views:
+            last_view_time = file_views[ip_hash]
+            if current_time - last_view_time < 45:
+                return False, cookie_value  # Don't count, return existing cookie
+        
+        # Check cookie value - if it matches our expected format, don't count
+        expected_cookie = f"{file_id}_{ip_hash}"
+        if cookie_value == expected_cookie:
+            if ip_hash in file_views and current_time - file_views[ip_hash] < 45:
+                return False, cookie_value
+        
+        # This is a valid new view
+        file_views[ip_hash] = current_time
+        return True, expected_cookie
 
 # --- Optimized Processing Functions with Numba ---
 @jit(nopython=True)
@@ -240,6 +320,34 @@ def add_selective_noise_jit(img_array, variance_threshold=50, seed=42):
                     result[y, x, c] = max(0, min(255, new_val))
     
     return result
+
+# --- EXIF Data Stripping ---
+def strip_exif_data(image_path):
+    """Strip all EXIF data from an image file"""
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (handles RGBA, P mode, etc.)
+            if img.mode not in ('RGB', 'L'):
+                if img.mode == 'RGBA':
+                    # Create white background for RGBA images
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1] if 'A' in img.mode else None)
+                    img = background
+                else:
+                    img = img.convert('RGB')
+            
+            # Create new image without EXIF data
+            data = list(img.getdata())
+            image_without_exif = Image.new(img.mode, img.size)
+            image_without_exif.putdata(data)
+            
+            # Save back to the same path
+            image_without_exif.save(image_path, quality=95, optimize=True)
+            
+        return True
+    except Exception as e:
+        print(f"Warning: Could not strip EXIF data from {image_path}: {e}")
+        return False
 
 # --- NSFW Detection Functions ---
 def advanced_nsfw_detector(img_array):
@@ -341,6 +449,20 @@ def schedule_cleanup():
                 if meta and meta.get('path') and os.path.exists(meta['path']):
                     secure_delete(meta['path'])
                     file_db.pop(fid, None)
+        
+        # Clean up old view tracking data
+        with view_tracking_lock:
+            current_time = time.time()
+            for file_id in list(view_tracking.keys()):
+                if file_id not in file_db:  # File was deleted
+                    view_tracking.pop(file_id, None)
+                else:
+                    # Clean up old IP entries (older than 1 hour)
+                    file_views = view_tracking[file_id]
+                    old_ips = [ip_hash for ip_hash, last_time in file_views.items() if current_time - last_time > 3600]
+                    for ip_hash in old_ips:
+                        file_views.pop(ip_hash, None)
+        
         gc.collect()  # Force garbage collection
         time.sleep(60)
 
@@ -373,7 +495,7 @@ def plausible_deniability_engine():
                     radical_image_compression(decoy_source, final_path, smart_anonymity_enabled=False)
                     if os.path.exists(final_path):
                         file_id = ''.join(random.choices(string.ascii_letters+string.digits, k=12))
-                        file_db[file_id] = {'path': final_path,'password_hash': get_password_hash(''.join(random.choices(string.ascii_letters + string.digits, k=10))),'delete_at': datetime.now(timezone.utc) + timedelta(hours=random.uniform(1, 5)),'size_mb': os.path.getsize(final_path) / (1024*1024),'original_name': os.path.basename(decoy_source),'views': 0, 'max_views': random.randint(5, 50), 'is_encrypted': False,'is_video': False, 'aes_password': None, 'uploaded_at': datetime.now(timezone.utc),'deletion_reason': None, 'is_nsfw': False}
+                        file_db[file_id] = {'path': final_path,'password_hash': get_password_hash(''.join(random.choices(string.ascii_letters + string.digits, k=10))),'delete_at': datetime.now(timezone.utc) + timedelta(hours=random.uniform(1, 5)),'size_mb': os.path.getsize(final_path) / (1024*1024),'original_name': os.path.basename(decoy_source),'views': 0, 'max_views': random.randint(5, 150), 'is_encrypted': False,'is_video': False, 'aes_password': None, 'uploaded_at': datetime.now(timezone.utc),'deletion_reason': None, 'is_nsfw': False, 'ignore_duplicate_views': False}
         time.sleep(random.randint(54, 68) * 60)
 
 def get_password_hash(password): return hashlib.sha3_512((password + PASSWORD_SALT).encode()).hexdigest()
@@ -403,6 +525,9 @@ def check_report_rate_limit():
 # --- Image and Video Processing ---
 def radical_image_compression(input_path, output_path, smart_anonymity_enabled=False):
     try:
+        # First, strip EXIF data from the original file
+        strip_exif_data(input_path)
+        
         img = cv2.imread(input_path)
         if img is None: raise ValueError("Could not read image")
 
@@ -423,8 +548,8 @@ def radical_image_compression(input_path, output_path, smart_anonymity_enabled=F
         quantized_flat = optimized_color_quantization(img_flat, k=256)
         img = quantized_flat.reshape(img.shape)
 
-        # --- 4. Enhanced Smart Anonymity Features ---
-        if smart_anonymity_enabled:
+        # --- 4. Enhanced Smart Anonymity Features (only if enabled) ---
+        if smart_anonymity_enabled and APP_CONFIG['smart_anonymity_enabled']:
             # Face blurring
             if os.path.exists(HAAR_CASCADE_PATH):
                 face_cascade = cv2.CascadeClassifier(HAAR_CASCADE_PATH)
@@ -494,6 +619,8 @@ def radical_image_compression(input_path, output_path, smart_anonymity_enabled=F
     except Exception as e:
         print(f"Error during image processing: {e}")
         shutil.copy(input_path, output_path)
+        # Still strip EXIF even if processing fails
+        strip_exif_data(output_path)
         return False
 
 def radical_video_compression(input_path, output_path):
@@ -577,6 +704,10 @@ UPLOAD_PAGE_TEMPLATE = """
         #aes_encrypt:checked ~ #aes_password_group { display: block; }
         #captcha-container img { border-radius: 4px; margin-top: 10px; }
         .js-warning { background-color: #ff6f00; color: #000; padding: 1rem; border-radius: 4px; text-align: center; font-weight: bold; margin-bottom: 1rem; display: none; }
+        .aes-warning { background-color: #b00020; color: #fff; padding: 1rem; border-radius: 4px; text-align: center; font-weight: bold; margin-bottom: 1rem; display: none; }
+        .speed-warning { background-color: #b00020; color: #fff; padding: 1rem; border-radius: 4px; text-align: center; font-weight: bold; margin-bottom: 1rem; }
+        .local-warning { background-color: #555; color: #ccc; padding: 1rem; border-radius: 4px; text-align: center; margin-bottom: 1rem; }
+        .hidden { display: none !important; }
     </style>
     <noscript>
         <style>
@@ -589,17 +720,40 @@ UPLOAD_PAGE_TEMPLATE = """
         <div class="js-warning" id="js-warning">
             ⚠️ WARNING: JavaScript is enabled in your browser. For maximum privacy and security, it is recommended to disable JavaScript by clicking the shield icon → Settings → Safest in your browser.
         </div>
+        
+        <div id="aes-warning" class="aes-warning">
+            ⚠️ WARNING: AES-256 encryption is enabled. This makes it impossible to view this file from the web, and we cannot process the media. EXIF data may remain. The host does not have access to your file, even if they wanted to. This encryption algorithm is used in the United States military.
+        </div>
+        
+        {% if show_speed_warning %}
+        <div class="speed-warning">
+            ⚠️ WARNING: The infrastructure of this website is very fast. This may be a sign that this is hosted by a malicious entity.
+        </div>
+        {% endif %}
+        
+        {% if show_local_warning %}
+        <div class="local-warning">
+            This is a testing application. http://{{ server_info }}
+        </div>
+        {% endif %}
+        
         <h1>Anonymous File Uploader</h1>
         <p class="jurisdiction-note">Note: This service is only for use within the jurisdiction of <strong>{{ JURISDICTION }}</strong>.</p>
         {% if error %}<p class="error">{{ error }}</p>{% endif %}
         <form action="/" method="post" enctype="multipart/form-data">
             <div class="form-group"><label for="files">Select files</label><input type="file" name="files" id="files" multiple required><p class="info">Max 10 files or 100s of video. Total size < 300MB.</p></div>
             <div class="form-group"><label for="password">Deletion Password (8-16 chars)</label><input type="password" name="password" id="password" minlength="8" maxlength="16" required></div>
-            <div class="form-group"><label for="max_views">Delete after views:</label><input type="number" name="max_views" id="max_views" min="5" max="50" value="30" style="width: 60px;"></div>
+            <div class="form-group"><label for="max_views">Delete after views:</label><input type="number" name="max_views" id="max_views" min="5" max="150" value="30" style="width: 60px;"></div>
+            <div class="form-group">
+                <input type="checkbox" name="ignore_duplicate_views" id="ignore_duplicate_views">
+                <label for="ignore_duplicate_views" style="display: inline;">Ignore views by the same person <span class="tooltip">i<span class="tooltiptext">Saves information and timing of a user to ensure their view cannot count several times.</span></span></label>
+            </div>
+            {% if smart_anonymity_enabled %}
             <div class="form-group">
                 <input type="checkbox" name="smart_anonymity" id="smart_anonymity">
                 <label for="smart_anonymity" style="display: inline;">Smart Anonymity? <span class="tooltip">i<span class="tooltiptext">For images only. Applies advanced, processor-intensive privacy filters including strengthened background blur.</span></span></label>
             </div>
+            {% endif %}
             <div class="form-group">
                 <input type="checkbox" name="aes_encrypt" id="aes_encrypt">
                 <label for="aes_encrypt" style="display: inline;">AES-256 Encrypt? <span class="tooltip">i<span class="tooltiptext">File won't be compressed or filtered. Max 25MB, 1 hour expiry.</span></span></label>
@@ -623,6 +777,18 @@ UPLOAD_PAGE_TEMPLATE = """
     <script>
         // Show JavaScript warning
         document.getElementById('js-warning').style.display = 'block';
+        
+        // Handle AES encryption warning
+        const aesCheckbox = document.getElementById('aes_encrypt');
+        const aesWarning = document.getElementById('aes-warning');
+        
+        aesCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                aesWarning.style.display = 'block';
+            } else {
+                aesWarning.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>
@@ -961,6 +1127,7 @@ RESULT_PAGE_TEMPLATE = """
                 <li><strong>Compressed Size:</strong> {{ "%.2f"|format(file.size_mb) }} MB</li>
                 <li><strong>Deletes At (UTC):</strong> {{ file.delete_at.strftime('%Y-%m-%d %H:%M:%S') }}</li>
                 <li><strong>Views Remaining:</strong> {{ file.views_left }} / {{ file.max_views }}</li>
+                {% if file.ignore_duplicate_views %}<li><strong>Duplicate View Protection:</strong> Enabled</li>{% endif %}
                 {% if file.is_encrypted %}<li><strong style="color: #cf6679;">AES-256 Password:</strong> {{ file.aes_password }} (Save this too!)</li>{% endif %}
             </ul>
             <a href="{{ url_for('delete_file_get', file_id=file.id) }}" class="delete-btn">Delete Now</a>
@@ -1048,20 +1215,54 @@ def submit_report():
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     global last_upload_time
+    
+    if request.method == 'GET':
+        # Detect hosting environment for warnings
+        is_local = detect_local_hosting()
+        server_info = get_server_info() if is_local else None
+        
+        # For speed detection, we use a simple heuristic
+        # If request came too fast (< 100ms between requests), show warning
+        # This is a simplified approach - in practice, you'd need more sophisticated detection
+        show_speed_warning = not is_local  # Show for non-local unless we have better detection
+        
+        return render_template_string(UPLOAD_PAGE_TEMPLATE, 
+                                    JURISDICTION=JURISDICTION,
+                                    smart_anonymity_enabled=APP_CONFIG['smart_anonymity_enabled'],
+                                    show_speed_warning=show_speed_warning,
+                                    show_local_warning=is_local,
+                                    server_info=server_info)
+    
     if request.method == 'POST':
         if 'captcha' not in session or request.form.get('captcha','').lower() != session['captcha'].lower():
-            return render_template_string(UPLOAD_PAGE_TEMPLATE, error="Incorrect captcha.", JURISDICTION=JURISDICTION)
+            return render_template_string(UPLOAD_PAGE_TEMPLATE, 
+                                        error="Incorrect captcha.", 
+                                        JURISDICTION=JURISDICTION,
+                                        smart_anonymity_enabled=APP_CONFIG['smart_anonymity_enabled'],
+                                        show_speed_warning=False,
+                                        show_local_warning=detect_local_hosting(),
+                                        server_info=get_server_info() if detect_local_hosting() else None)
         session.pop('captcha', None)
 
         files, password = request.files.getlist('files'), request.form.get('password')
-        aes_encrypt, smart_anonymity = 'aes_encrypt' in request.form, 'smart_anonymity' in request.form
+        aes_encrypt = 'aes_encrypt' in request.form
+        smart_anonymity = 'smart_anonymity' in request.form and APP_CONFIG['smart_anonymity_enabled']
+        ignore_duplicate_views = 'ignore_duplicate_views' in request.form
         aes_password, max_views = request.form.get('aes_password'), int(request.form.get('max_views', 30))
 
         error = None
         if not files or files[0].filename == '': error = 'No files selected.'
         elif not (password and 8 <= len(password) <= 16): error = 'Deletion password must be 8-16 characters.'
         elif aes_encrypt and not aes_password: error = 'AES encryption requires its own password.'
-        if error: return render_template_string(UPLOAD_PAGE_TEMPLATE, error=error, JURISDICTION=JURISDICTION)
+        elif max_views < 5 or max_views > 150: error = 'Max views must be between 5 and 150.'
+        if error: 
+            return render_template_string(UPLOAD_PAGE_TEMPLATE, 
+                                        error=error, 
+                                        JURISDICTION=JURISDICTION,
+                                        smart_anonymity_enabled=APP_CONFIG['smart_anonymity_enabled'],
+                                        show_speed_warning=False,
+                                        show_local_warning=detect_local_hosting(),
+                                        server_info=get_server_info() if detect_local_hosting() else None)
         
         last_upload_time, processed_files = time.time(), []
         password_hash = get_password_hash(password)
@@ -1081,6 +1282,11 @@ def upload_file():
                 if aes_encrypt:
                     if os.path.getsize(temp_path) > 25 * 1024 * 1024:
                         error = "AES encrypted files cannot exceed 25MB."; os.remove(temp_path); break
+                    
+                    # Strip EXIF before encryption for images
+                    if is_img:
+                        strip_exif_data(temp_path)
+                    
                     cipher = AES.new(hashlib.sha256(aes_password.encode()).digest(), AES.MODE_EAX)
                     with open(temp_path, 'rb') as f_in: ciphertext, tag = cipher.encrypt_and_digest(f_in.read())
                     with open(final_path, 'wb') as f_out: [f_out.write(x) for x in (cipher.nonce, tag, ciphertext)]
@@ -1099,19 +1305,54 @@ def upload_file():
                 
                 file_id = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
                 with db_lock:
-                    file_db[file_id] = {'path': final_path, 'password_hash': password_hash, 'delete_at': datetime.now(timezone.utc) + timedelta(hours=delete_hours),'size_mb': os.path.getsize(final_path)/(1024*1024),'original_name': original_filename, 'views': 0,'max_views': max(5, min(50, max_views)),'is_encrypted': aes_encrypt,'is_video': is_video,'aes_password': aes_password if aes_encrypt else None,'uploaded_at': datetime.now(timezone.utc), 'is_nsfw': is_nsfw}
-                processed_files.append({'id': file_id, 'original_name': original_filename, 'size_mb': file_db[file_id]['size_mb'], 'is_video': is_video, 'delete_at': file_db[file_id]['delete_at'], 'views_left': file_db[file_id]['max_views'], 'max_views': file_db[file_id]['max_views'], 'is_encrypted': aes_encrypt, 'aes_password': aes_password if aes_encrypt else None, 'is_nsfw': is_nsfw})
+                    file_db[file_id] = {
+                        'path': final_path, 
+                        'password_hash': password_hash, 
+                        'delete_at': datetime.now(timezone.utc) + timedelta(hours=delete_hours),
+                        'size_mb': os.path.getsize(final_path)/(1024*1024),
+                        'original_name': original_filename, 
+                        'views': 0,
+                        'max_views': max(5, min(150, max_views)),
+                        'is_encrypted': aes_encrypt,
+                        'is_video': is_video,
+                        'aes_password': aes_password if aes_encrypt else None,
+                        'uploaded_at': datetime.now(timezone.utc), 
+                        'is_nsfw': is_nsfw,
+                        'ignore_duplicate_views': ignore_duplicate_views
+                    }
+                processed_files.append({
+                    'id': file_id, 
+                    'original_name': original_filename, 
+                    'size_mb': file_db[file_id]['size_mb'], 
+                    'is_video': is_video, 
+                    'delete_at': file_db[file_id]['delete_at'], 
+                    'views_left': file_db[file_id]['max_views'], 
+                    'max_views': file_db[file_id]['max_views'], 
+                    'is_encrypted': aes_encrypt, 
+                    'aes_password': aes_password if aes_encrypt else None, 
+                    'is_nsfw': is_nsfw,
+                    'ignore_duplicate_views': ignore_duplicate_views
+                })
 
-        if error: return render_template_string(UPLOAD_PAGE_TEMPLATE, error=error, JURISDICTION=JURISDICTION)
+        if error: 
+            return render_template_string(UPLOAD_PAGE_TEMPLATE, 
+                                        error=error, 
+                                        JURISDICTION=JURISDICTION,
+                                        smart_anonymity_enabled=APP_CONFIG['smart_anonymity_enabled'],
+                                        show_speed_warning=False,
+                                        show_local_warning=detect_local_hosting(),
+                                        server_info=get_server_info() if detect_local_hosting() else None)
         manage_storage()
         return render_template_string(RESULT_PAGE_TEMPLATE, files=processed_files, masked_password=mask_password(password))
-    return render_template_string(UPLOAD_PAGE_TEMPLATE, JURISDICTION=JURISDICTION)
 
 @app.route('/view/<file_id>')
 def view_file(file_id):
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', '127.0.0.1'))
+    
     with db_lock:
         meta = file_db.get(file_id)
-        if not meta or not os.path.exists(meta.get('path','')): return "File not found or has been deleted.", 404
+        if not meta or not os.path.exists(meta.get('path','')): 
+            return "File not found or has been deleted.", 404
         
         # Check for immediate deletion conditions
         is_expired = meta['delete_at'] <= datetime.now(timezone.utc)
@@ -1122,9 +1363,21 @@ def view_file(file_id):
             file_db.pop(file_id, None)
             return "File not found or has been deleted.", 404
 
-        meta['views'] += 1
+        # Handle view counting based on duplicate view settings
+        should_count = True
+        view_cookie_name = f"viewed_{file_id}"
+        existing_cookie = request.cookies.get(view_cookie_name, '')
+        
+        if meta.get('ignore_duplicate_views', False):
+            should_count, new_cookie_value = should_count_view(file_id, client_ip, existing_cookie)
+        else:
+            new_cookie_value = f"{file_id}_{hash_ip(client_ip)}"
+        
+        if should_count:
+            meta['views'] += 1
     
-    if meta['is_encrypted']: return "This file is AES-256 encrypted. Download and decrypt it.", 403
+    if meta['is_encrypted']: 
+        return "This file is AES-256 encrypted. Download and decrypt it. We recommend using Tails downloads.", 403
 
     # Handle NSFW content
     if meta.get('is_nsfw', False) and not meta.get('is_video', False):
@@ -1132,17 +1385,22 @@ def view_file(file_id):
         with open(meta['path'], 'rb') as f:
             image_data = base64.b64encode(f.read()).decode()
         mimetype, _ = mimetypes.guess_type(meta['path'])
-        return render_template_string(NSFW_VIEW_TEMPLATE, 
+        response = make_response(render_template_string(NSFW_VIEW_TEMPLATE, 
                                     image_data=image_data, 
                                     mimetype=mimetype or 'image/jpeg',
                                     file_id=file_id,
-                                    JURISDICTION=JURISDICTION)
-
-    mimetype, _ = mimetypes.guess_type(meta['path'])
-    with open(meta['path'], 'rb') as f:
-        response = make_response(f.read())
-    response.headers['Content-Type'] = mimetype or 'application/octet-stream'
-    response.headers['Content-Disposition'] = f'inline; filename="{meta.get("original_name", file_id)}"'
+                                    JURISDICTION=JURISDICTION))
+    else:
+        mimetype, _ = mimetypes.guess_type(meta['path'])
+        with open(meta['path'], 'rb') as f:
+            response = make_response(f.read())
+        response.headers['Content-Type'] = mimetype or 'application/octet-stream'
+        response.headers['Content-Disposition'] = f'inline; filename="{meta.get("original_name", file_id)}"'
+    
+    # Set view tracking cookie if needed
+    if meta.get('ignore_duplicate_views', False):
+        response.set_cookie(view_cookie_name, new_cookie_value, max_age=3600, httponly=True, secure=request.is_secure)
+    
     return response
 
 @app.route('/delete', methods=['POST'])
@@ -1158,7 +1416,15 @@ def delete_file_post():
                 if fid in file_db and os.path.exists(file_db[fid].get('path','')):
                     secure_delete(file_db[fid]['path']); file_db.pop(fid, None); deleted_count += 1
             if deleted_count > 0: feedback = f"Successfully deleted {deleted_count} file(s)."
-    return render_template_string(UPLOAD_PAGE_TEMPLATE, deletion_feedback=feedback, JURISDICTION=JURISDICTION)
+    
+    is_local = detect_local_hosting()
+    return render_template_string(UPLOAD_PAGE_TEMPLATE, 
+                                deletion_feedback=feedback, 
+                                JURISDICTION=JURISDICTION,
+                                smart_anonymity_enabled=APP_CONFIG['smart_anonymity_enabled'],
+                                show_speed_warning=False,
+                                show_local_warning=is_local,
+                                server_info=get_server_info() if is_local else None)
 
 @app.route('/delete/<file_id>')
 def delete_file_get(file_id):
