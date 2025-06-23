@@ -36,7 +36,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 * 🕛 **Ephemeral**: All files are deleted after three hours, a certain amount of views, or to recycle host storage.
 * ❌ **Smart Anonymity**: Intelligent measures to anonymize more, e.g. by blurring faces, background, and text.
 * 🤖 **CAPTCHA**: Requires the user to do a captcha before upload.
-* 🪖 **Gutmann deletion**: US Military file shredding using the Gutmann method. Plausible deniability with background fake data generation.
+* 🪖 **Gutmann deletion**: Paranoid civilian file shredding using the Gutmann method. Plausible deniability with background fake data generation.
 * 🪖 **AES-256 password protection**: Encrypt files by password. Makes it impossible for the host to see your files. Used by the US military.
 * 🅾️ **Zero-Log Policy**: The Flask server is configured to suppress all access and error logs.
 * 🧠 **In-Memory Database**: File metadata is stored in a volatile Python dictionary, which is lost on application restart.
