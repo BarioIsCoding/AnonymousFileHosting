@@ -4,7 +4,6 @@
 
 ## DEMO
 ![A screenshot of the home page](https://i.ibb.co/hRyJ2nBs/image-2025-06-23-143425108.png)
-
 ![Before vs After comparison](https://i.ibb.co/tpMFvB4n/2.gif)
 
 ---
