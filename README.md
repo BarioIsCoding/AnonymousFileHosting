@@ -2,10 +2,11 @@
 
 ## A Tool for Anonymously Reducing Storage of Files in Vanuatu
 
-1. [DEMO](#demo)
-2. [Project Goal)(#project-goal)
-3. 
-4. 
+0. [DEMO](#demo)
+1. [Project Goal](#1-project-goal)
+2. [Features](#2-features)
+3. ![Setup & Installation](#3-setup--installation)
+
 ## DEMO
 ![A screenshot of the home page](https://i.ibb.co/hRyJ2nBs/image-2025-06-23-143425108.png)
 ![Before vs After comparison](https://i.ibb.co/tpMFvB4n/2.gif)
