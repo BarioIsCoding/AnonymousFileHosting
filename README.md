@@ -43,7 +43,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 * 🫥 **No IP leakage**: We don't know your IP nor do we use it.
 * 🧅 **Onion**: Works very well with minimal speed and data.
 
-## 4. Setup & Installation
+## 3. Setup & Installation
 
 1.  **Clone the repository:**
 
