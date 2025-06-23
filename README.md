@@ -36,7 +36,7 @@ This application is an exploration into building a highly ephemeral, privacy-cen
 * 🧠 **In-Memory Database**: File metadata is stored in a volatile Python dictionary, which is lost on application restart.
 * 🚤 **Aggressive Compression**: Videos and images are heavily compressed with low bitrates and reduced resolutions to optimize speed.
 * 🩶 **Color Quantization**: Images are posterized, reducing the color palette to just 256 colors. This merges flat areas, enhances anonymity, and significantly cuts down on loading time.
-* 🤫 **Selective Noise**: A small amount of digital noise is added only to high-detail areas of an image, further breaking forensic analysis without unnecessarily increasing loading speed.
+* 🤫 **Selective Noise**: Digital noise on high-detail area, further breaking analysis without unnecessarily slowing down loading.
 * 🔈 **Audio Stripping**: All audio tracks are removed from video files.
 * 🛜 **NoJS**: Supports running without JavaScript
 * 🍪 **NoCookie**: Supports running without cookie
